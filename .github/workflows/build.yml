@@ -29,13 +29,13 @@ jobs:
         choco install 7zip -y
         choco install innosetup -y
 
-    - name: Setup PJSIP Libraries
+    - name: Setup Directory Structure
       shell: pwsh
       run: |
         Set-Location "${{ github.workspace }}"
         Set-Location ".."
 
-        Write-Host "Setting up PJSIP libraries directory structure..."
+        Write-Host "Setting up directory structure..."
 
         # Create PJSIP directory structure expected by MicroSIP
         $pjPaths = @(
@@ -78,7 +78,7 @@ jobs:
         Set-Location ".."
 
         # Check if PJSIP already built
-        if (Test-Path "pjlib/lib/pjlib-i386-Win32-vc14-Release.lib") {
+        if (Test-Path "pjproject/pjlib/lib/pjlib-i386-Win32-vc14-Release.lib") {
             Write-Host "PJSIP already built, skipping..."
             exit 0
         }
@@ -147,25 +147,36 @@ jobs:
 
         Write-Host "Building PJSIP with MSBuild..."
 
-        # Build PJSIP using MSBuild
+        # Build PJSIP using MSBuild with solution file
         $msbuild = "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
 
-        # Build each component
-        $projects = @(
-            "pjlib/build/pjlib.vcxproj",
-            "pjlib-util/build/pjlib-util.vcxproj",
-            "pjnath/build/pjnath.vcxproj",
-            "pjmedia/build/pjmedia.vcxproj",
-            "pjsip/build/pjsip.vcxproj",
-            "pjsip/build/pjsip_simple.vcxproj",
-            "pjsip/build/pjsua_lib.vcxproj"
-        )
+        # Try to build using solution file first
+        if (Test-Path "pjproject.sln") {
+            Write-Host "Building using solution file..."
+            & $msbuild "pjproject.sln" /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v140 /m
+        } else {
+            # Build individual projects
+            Write-Host "Building individual projects..."
+            $projects = @(
+                "pjlib/build/pjlib.vcxproj",
+                "pjlib-util/build/pjlib-util.vcxproj",
+                "pjnath/build/pjnath.vcxproj",
+                "pjmedia/build/pjmedia.vcxproj",
+                "pjsip/build/pjsip.vcxproj",
+                "pjsip/build/pjsip_simple.vcxproj",
+                "pjsip/build/pjsua_lib.vcxproj"
+            )
 
-        foreach ($proj in $projects) {
-            Write-Host "Building $proj..."
-            & $msbuild $proj /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v140 /m
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "Warning: Build of $proj may have issues, continuing..."
+            foreach ($proj in $projects) {
+                if (Test-Path $proj) {
+                    Write-Host "Building $proj..."
+                    & $msbuild $proj /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v140 /m
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host "Warning: Build of $proj may have issues, continuing..."
+                    }
+                } else {
+                    Write-Host "Project file not found: $proj"
+                }
             }
         }
 
