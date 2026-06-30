@@ -11,7 +11,6 @@ env:
   BUILD_CONFIGURATION: Release
   BUILD_PLATFORM: Win32
   PLATFORM_TOOLSET: v143
-  WINDOWS_SDK: "10.0.22621.0"
 
 jobs:
   build:
@@ -32,7 +31,7 @@ jobs:
           choco install innosetup -y
 
       # -----------------------------
-      # PJSIP DOWNLOAD + FIX STRUCTURE
+      # PJSIP DOWNLOAD
       # -----------------------------
       - name: Download PJSIP
         shell: pwsh
@@ -55,13 +54,13 @@ jobs:
           } | Select-Object -First 1
 
           if (-not $folder) {
-            throw "PJSIP folder not found after extraction"
+            throw "PJSIP folder not found"
           }
 
           Rename-Item $folder.FullName "pjproject"
 
       # -----------------------------
-      # FIND SOLUTION FILE DYNAMICALLY
+      # FIND SOLUTION FILE
       # -----------------------------
       - name: Find PJSIP solution
         shell: pwsh
@@ -76,11 +75,11 @@ jobs:
             throw "PJSIP solution not found"
           }
 
-          Write-Host "Solution found: $($sln.FullName)"
+          Write-Host "Solution: $($sln.FullName)"
           $sln.FullName | Out-File sln.txt
 
       # -----------------------------
-      # CONFIG PJSIP (FFMPEG OFF = STABLE CI)
+      # PJSIP CONFIG (CI SAFE)
       # -----------------------------
       - name: Configure PJSIP
         shell: pwsh
@@ -135,7 +134,7 @@ jobs:
             /m
 
       # -----------------------------
-      # BUILD MICROSIP (SDK FIX HERE)
+      # BUILD MICRO SIP (NO SDK PINNING!)
       # -----------------------------
       - name: Build MicroSIP
         shell: pwsh
@@ -144,11 +143,10 @@ jobs:
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
             /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
-            /p:WindowsTargetPlatformVersion=${{ env.WINDOWS_SDK }} `
             /m
 
       # -----------------------------
-      # PACKAGE OUTPUT
+      # OUTPUT
       # -----------------------------
       - name: Prepare Output
         shell: pwsh
@@ -169,7 +167,7 @@ jobs:
           path: output/
 
   # -----------------------------
-  # INSTALLER STAGE
+  # INSTALLER
   # -----------------------------
   create-installer:
     needs: build
