@@ -10,7 +10,6 @@ on:
 env:
   BUILD_CONFIGURATION: Release
   BUILD_PLATFORM: Win32
-  PLATFORM_TOOLSET: v143
 
 jobs:
   build:
@@ -30,40 +29,47 @@ jobs:
           choco install 7zip -y
           choco install innosetup -y
 
-      - name: Download PJSIP (robust extract)
+      - name: Download PJSIP
         shell: pwsh
         run: |
           Write-Host "Downloading PJSIP..."
 
           $version = "2.15.1"
-          $zip = "pj.zip"
           $url = "https://github.com/pjsip/pjproject/archive/refs/tags/$version.zip"
 
-          Invoke-WebRequest $url -OutFile $zip
+          Invoke-WebRequest $url -OutFile pj.zip
 
           if (Test-Path "pjproject") {
             Remove-Item -Recurse -Force pjproject
           }
 
-          Expand-Archive $zip -DestinationPath .
+          Expand-Archive pj.zip -DestinationPath .
 
-          # 🔥 find real extracted folder dynamically
           $folder = Get-ChildItem -Directory | Where-Object {
-            $_.Name -like "pjproject-*"
+            $_.Name -like "pjproject-$version*"
           } | Select-Object -First 1
 
           if (-not $folder) {
-            throw "PJSIP folder not found after extraction"
+            throw "Cannot find extracted pjproject folder"
           }
 
           Rename-Item $folder.FullName "pjproject"
 
-          if (!(Test-Path "pjproject/pjproject.sln")) {
-            Write-Host "DEBUG: extracted structure:"
-            Get-ChildItem -Recurse pjproject | ForEach-Object { $_.FullName }
+      - name: Find PJSIP solution
+        shell: pwsh
+        run: |
+          $sln = Get-ChildItem -Path "pjproject" -Recurse -Filter "*.sln" |
+                 Where-Object { $_.Name -like "*pjproject*" } |
+                 Select-Object -First 1
 
-            throw "pjproject.sln missing - invalid extraction"
+          if (-not $sln) {
+            Write-Host "DEBUG: pjproject tree:"
+            Get-ChildItem -Recurse pjproject | Select-Object FullName
+            throw "PJSIP solution not found"
           }
+
+          Write-Host "Found solution: $($sln.FullName)"
+          $sln.FullName | Out-File sln.txt
 
       - name: Configure PJSIP
         shell: pwsh
@@ -99,12 +105,14 @@ jobs:
       - name: Build PJSIP
         shell: pwsh
         run: |
-          Set-Location pjproject
+          $sln = Get-Content sln.txt
 
-          msbuild pjproject.sln `
+          Write-Host "Building PJSIP solution: $sln"
+
+          msbuild $sln `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
-            /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
+            /p:PlatformToolset=v143 `
             /m
 
       - name: Build MicroSIP
@@ -113,7 +121,7 @@ jobs:
           msbuild microsip.vcxproj `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
-            /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
+            /p:PlatformToolset=v143 `
             /m
 
       - name: Prepare Output
@@ -124,11 +132,11 @@ jobs:
           if (Test-Path "Release/microsip.exe") {
             Copy-Item "Release/microsip.exe" output/
           } else {
-            Write-Host "No microsip.exe found"
+            Write-Host "microsip.exe not found"
             Get-ChildItem -Recurse Release -ErrorAction SilentlyContinue
           }
 
-      - name: Upload Artifact
+      - name: Upload Build Artifact
         uses: actions/upload-artifact@v5
         with:
           name: microsip-build
