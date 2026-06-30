@@ -15,138 +15,137 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    # 🔥 Cache PJSIP (duży boost czasu builda)
-    - name: Cache PJSIP
-      id: cache-pjsip
-      uses: actions/cache@v4
-      with:
-        path: pjproject
-        key: pjsip-2.15.1-win32-v143
+      - name: Cache PJSIP
+        id: cache-pjsip
+        uses: actions/cache@v4
+        with:
+          path: pjproject
+          key: pjsip-2.15.1-win32-v143
 
-    - name: Add MSBuild
-      uses: microsoft/setup-msbuild@v2
-      with:
-        msbuild-architecture: x86
+      - name: Add MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x86
 
-    - name: Install Dependencies
-      shell: pwsh
-      run: |
-        choco install 7zip -y
-        choco install innosetup -y
+      - name: Install Dependencies
+        shell: pwsh
+        run: |
+          choco install 7zip -y
+          choco install innosetup -y
 
-    - name: Setup PJSIP (only if not cached)
-      if: steps.cache-pjsip.outputs.cache-hit != 'true'
-      shell: pwsh
-      run: |
-        Write-Host "Downloading PJSIP..."
+      - name: Setup PJSIP (if not cached)
+        if: steps.cache-pjsip.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "Downloading PJSIP..."
 
-        $version = "2.15.1"
-        $url = "https://github.com/pjsip/pjproject/archive/refs/tags/$version.zip"
+          $version = "2.15.1"
+          $url = "https://github.com/pjsip/pjproject/archive/refs/tags/$version.zip"
 
-        Invoke-WebRequest $url -OutFile pj.zip
-        Expand-Archive pj.zip -DestinationPath .
+          Invoke-WebRequest $url -OutFile pj.zip
+          Expand-Archive pj.zip -DestinationPath .
+          Rename-Item "pjproject-$version" "pjproject"
 
-        Rename-Item "pjproject-$version" "pjproject"
+      - name: Configure PJSIP
+        shell: pwsh
+        run: |
+          Set-Location pjproject
 
-  - name: Configure PJSIP
-  shell: pwsh
-  run: |
-    Set-Location pjproject
+          $configLines = @(
+            "#ifndef __PJ_CONFIG_SITE_H__",
+            "#define __PJ_CONFIG_SITE_H__",
+            "",
+            "#define PJ_CONFIG_MICROSIP 1",
+            "",
+            "#define PJMEDIA_HAS_VIDEO 1",
+            "#define PJMEDIA_HAS_FFMPEG 1",
+            "#define PJMEDIA_HAS_VPX 1",
+            "",
+            "#define PJMEDIA_HAS_OPUS 1",
+            "#define PJMEDIA_HAS_SILK 1",
+            "#define PJMEDIA_HAS_G722 1",
+            "#define PJMEDIA_HAS_GSM 1",
+            "",
+            "#define PJMEDIA_HAS_SRTP 1",
+            "#define PJMEDIA_HAS_TLS 1",
+            "",
+            "#include <pj/config_site_sample.h>",
+            "",
+            "#endif"
+          )
 
-    $configLines = @(
-      "#ifndef __PJ_CONFIG_SITE_H__",
-      "#define __PJ_CONFIG_SITE_H__",
-      "",
-      "#define PJ_CONFIG_MICROSIP 1",
-      "",
-      "#define PJMEDIA_HAS_VIDEO 1",
-      "#define PJMEDIA_HAS_FFMPEG 1",
-      "#define PJMEDIA_HAS_VPX 1",
-      "",
-      "#define PJMEDIA_HAS_OPUS 1",
-      "#define PJMEDIA_HAS_SILK 1",
-      "#define PJMEDIA_HAS_G722 1",
-      "#define PJMEDIA_HAS_GSM 1",
-      "",
-      "#define PJMEDIA_HAS_SRTP 1",
-      "#define PJMEDIA_HAS_TLS 1",
-      "",
-      "#include <pj/config_site_sample.h>",
-      "",
-      "#endif"
-    )
+          Set-Content -Path "pjlib/include/pj/config_site.h" -Value ($configLines -join "`r`n")
 
-    Set-Content -Path "pjlib/include/pj/config_site.h" -Value ($configLines -join "`r`n")
-        Set-Content pjlib/include/pj/config_site.h $cfg
+      - name: Build PJSIP
+        shell: pwsh
+        run: |
+          Set-Location pjproject
 
-    - name: Build PJSIP
-      shell: pwsh
-      run: |
-        Set-Location pjproject
+          msbuild pjproject.sln `
+            /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
+            /p:Platform=${{ env.BUILD_PLATFORM }} `
+            /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
+            /m
 
-        Write-Host "Building PJSIP..."
+      - name: Build MicroSIP
+        shell: pwsh
+        run: |
+          msbuild microsip.vcxproj `
+            /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
+            /p:Platform=${{ env.BUILD_PLATFORM }} `
+            /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
+            /m
 
-        msbuild pjproject.sln `
-          /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
-          /p:Platform=${{ env.BUILD_PLATFORM }} `
-          /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
-          /m
+      - name: Prepare Output
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force output | Out-Null
 
-    - name: Build MicroSIP
-      shell: pwsh
-      run: |
-        Write-Host "Building MicroSIP..."
+          if (Test-Path "Release/microsip.exe") {
+            Copy-Item "Release/microsip.exe" output/
+          }
 
-        msbuild microsip.vcxproj `
-          /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
-          /p:Platform=${{ env.BUILD_PLATFORM }} `
-          /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
-          /m
-
-    - name: Prepare Output
-      shell: pwsh
-      run: |
-        New-Item -ItemType Directory -Force output
-
-        if (Test-Path "Release/microsip.exe") {
-          Copy-Item "Release/microsip.exe" output/
-        }
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: microsip-build
-        path: output/
-
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: microsip-build
+          path: output/
 
   create-installer:
     needs: build
-    runs-on: windows-latest   # 🔥 FIX (było 2019)
+    runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Download artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: microsip-build
-        path: output/
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: microsip-build
+          path: output/
 
-    - name: Install Inno Setup
-      shell: pwsh
-      run: choco install innosetup -y
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y
 
-    - name: Build Installer
-      shell: pwsh
-      run: |
-        $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-        & $iscc installer.iss
+      - name: Build Installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 
-    - name: Upload Installer
-      uses: actions/upload-artifact@v4
-      with:
-        name: microsip-installer
-        path: "*.exe"
+          if (Test-Path $iscc) {
+            & $iscc installer.iss
+          } else {
+            Write-Host "Inno Setup not found"
+            exit 1
+          }
+
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: microsip-installer
+          path: "*.exe"
