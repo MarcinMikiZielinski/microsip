@@ -19,75 +19,43 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # -----------------------------
-      # MSBUILD
-      # -----------------------------
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v3
         with:
           msbuild-architecture: x86
 
-      # -----------------------------
-      # DEPENDENCIES
-      # -----------------------------
       - name: Install Dependencies
         shell: pwsh
         run: |
           choco install 7zip -y
           choco install innosetup -y
 
-      # -----------------------------
-      # PJSIP DOWNLOAD
-      # -----------------------------
-      - name: Download PJSIP
+      # =========================
+      # FIX #1: PROPER PJSIP CLONE (NO ZIP!)
+      # =========================
+      - name: Clone PJSIP (FULL + SUBMODULES)
         shell: pwsh
         run: |
-          $version = "2.15.1"
-          Invoke-WebRequest "https://github.com/pjsip/pjproject/archive/refs/tags/$version.zip" -OutFile pj.zip
-
           if (Test-Path pjproject) {
             Remove-Item -Recurse -Force pjproject
           }
 
-          Expand-Archive pj.zip -DestinationPath .
+          git clone --recursive https://github.com/pjsip/pjproject.git
 
-          $folder = Get-ChildItem -Directory | Where-Object {
-            $_.Name -like "pjproject-$version*"
-          } | Select-Object -First 1
-
-          Rename-Item $folder.FullName pjproject
-
-      # -----------------------------
-      # FIND SOLUTION
-      # -----------------------------
-      - name: Find solution
+      # =========================
+      # FIX #2: RETARGET SDK
+      # =========================
+      - name: Fix Windows SDK 8.1
         shell: pwsh
         run: |
-          $sln = Get-ChildItem pjproject -Recurse -Filter "*.sln" |
-                 Where-Object Name -like "*pjproject*" |
-                 Select-Object -First 1
-
-          if (-not $sln) { throw "No solution found" }
-
-          $sln.FullName | Out-File sln.txt
-
-      # -----------------------------
-      # FIX SDK 8.1 (CRITICAL STEP)
-      # -----------------------------
-      - name: Fix Windows SDK (8.1 -> 10.0)
-        shell: pwsh
-        run: |
-          Write-Host "Patching vcxproj SDK version..."
-
-          Get-ChildItem -Path . -Recurse -Filter "*.vcxproj" | ForEach-Object {
-            (Get-Content $_.FullName) `
-              -replace "8.1", "10.0" |
-              Set-Content $_.FullName
+          Get-ChildItem -Recurse pjproject -Filter "*.vcxproj" | ForEach-Object {
+            (Get-Content $_.FullName) -replace "8.1", "10.0" |
+            Set-Content $_.FullName
           }
 
-      # -----------------------------
-      # PJSIP CONFIG (CI SAFE)
-      # -----------------------------
+      # =========================
+      # CONFIG PJSIP (CI SAFE)
+      # =========================
       - name: Configure PJSIP
         shell: pwsh
         run: |
@@ -108,6 +76,7 @@ jobs:
             "#define PJMEDIA_HAS_SILK 1",
             "#define PJMEDIA_HAS_G722 1",
             "#define PJMEDIA_HAS_GSM 1",
+            "",
             "#define PJMEDIA_HAS_SRTP 1",
             "#define PJMEDIA_HAS_TLS 1",
             "",
@@ -118,23 +87,24 @@ jobs:
 
           Set-Content pjlib/include/pj/config_site.h ($cfg -join "`r`n")
 
-      # -----------------------------
+      # =========================
       # BUILD PJSIP
-      # -----------------------------
+      # =========================
       - name: Build PJSIP
         shell: pwsh
         run: |
-          $sln = Get-Content sln.txt
+          $sln = Get-ChildItem pjproject -Recurse -Filter "*pjproject*.sln" |
+                 Select-Object -First 1
 
-          msbuild $sln `
+          msbuild $sln.FullName `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
             /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
             /m
 
-      # -----------------------------
-      # BUILD MICRO SIP
-      # -----------------------------
+      # =========================
+      # BUILD MICROSIP
+      # =========================
       - name: Build MicroSIP
         shell: pwsh
         run: |
@@ -144,19 +114,16 @@ jobs:
             /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
             /m
 
-      # -----------------------------
+      # =========================
       # OUTPUT
-      # -----------------------------
+      # =========================
       - name: Prepare Output
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force output | Out-Null
+          Copy-Item Release/microsip.exe output/ -ErrorAction SilentlyContinue
 
-          if (Test-Path "Release/microsip.exe") {
-            Copy-Item "Release/microsip.exe" output/
-          }
-
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v5
         with:
           name: microsip
