@@ -209,6 +209,7 @@ protected:
 	afx_msg LRESULT onMWIInfo(WPARAM wParam,LPARAM lParam);
 	afx_msg LRESULT onCallMediaState(WPARAM, LPARAM);
 	afx_msg LRESULT onCallTransferStatus(WPARAM, LPARAM);
+	afx_msg LRESULT onCallerIdUpdate(WPARAM, LPARAM);
 	afx_msg LRESULT onPager(WPARAM, LPARAM);
 	afx_msg LRESULT onPagerStatus(WPARAM, LPARAM);
 	afx_msg LRESULT onBuddyState(WPARAM, LPARAM);

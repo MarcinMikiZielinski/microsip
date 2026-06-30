@@ -1301,6 +1301,31 @@ LRESULT CmainDlg::onCallTransferStatus(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
+LRESULT CmainDlg::onCallerIdUpdate(WPARAM wParam, LPARAM lParam)
+{
+	pjsua_call_info* call_info = (pjsua_call_info*)wParam;
+	call_user_data* user_data = (call_user_data*)lParam;
+
+	// Re-run the same name resolution AddTab() uses when a call first
+	// starts, now that user_data->callerID/name have been refreshed from
+	// a mid-call P-Asserted-Identity / Remote-Party-ID update. Passing an
+	// explicit non-empty `name` makes AddTab() update the already-open
+	// tab's text and (if it's the active tab) the window title, which it
+	// otherwise skips for calls that already have an open tab.
+	CString number = MSIP::PjToStr(&call_info->remote_info, TRUE);
+	SIPURI sipuri;
+	ParseCallSIPURI(number, user_data, &sipuri);
+	CString numberOriginal;
+	CString name = GetNameForCall(sipuri, user_data, numberOriginal);
+
+	if (!name.IsEmpty()) {
+		messagesDlg->AddTab(number, FALSE, call_info, user_data, TRUE, TRUE, _T(""), name);
+	}
+
+	delete call_info;
+	return 0;
+}
+
 static void on_call_transfer_request2(pjsua_call_id call_id, const pj_str_t * dst, pjsip_status_code * code, pjsua_call_setting * opt)
 {
 	SIPURI sipuri;
@@ -1460,8 +1485,32 @@ static void on_call_tsx_state(pjsua_call_id call_id, pjsip_transaction * tsx, pj
 							}
 							user_data->callerID.Trim();
 						}
+						// Also refresh the display-name portion (if any), so
+						// the bold caller name -- not just the address line --
+						// reflects the updated identity (e.g. after an
+						// attended transfer completes via re-INVITE).
+						if (!user_data->callerID.IsEmpty()) {
+							SIPURI sipuriId;
+							MSIP::ParseSIPURI(user_data->callerID, &sipuriId);
+							if (!sipuriId.name.IsEmpty()) {
+								user_data->name = sipuriId.name;
+							}
+						}
 						//--
 						user_data->CS.Unlock();
+
+						// Notify the UI thread so the already-open call/messages
+						// tab gets repainted with the new identity. Without this,
+						// the updated callerID/name only take effect for *new*
+						// lookups, never for the live call view, because nothing
+						// else re-reads them after the call has been answered.
+						pjsua_call_info* call_info_copy = new pjsua_call_info();
+						if (pjsua_call_get_info(call_id, call_info_copy) == PJ_SUCCESS) {
+							PostMessage(mainDlg->m_hWnd, UM_ON_CALLERID_UPDATE, (WPARAM)call_info_copy, (LPARAM)user_data);
+						}
+						else {
+							delete call_info_copy;
+						}
 					}
 				}
 				// -- end reason
@@ -1668,6 +1717,7 @@ BEGIN_MESSAGE_MAP(CmainDlg, CBaseDialog)
 	ON_MESSAGE(UM_ON_MWI_INFO, onMWIInfo)
 	ON_MESSAGE(UM_ON_CALL_MEDIA_STATE, onCallMediaState)
 	ON_MESSAGE(UM_ON_CALL_TRANSFER_STATUS, onCallTransferStatus)
+	ON_MESSAGE(UM_ON_CALLERID_UPDATE, onCallerIdUpdate)
 	ON_MESSAGE(UM_ON_PLAYER_STOP, onPlayerStop)
 	ON_MESSAGE(UM_ON_COMMAND_LINE, onCommandLine)
 	ON_MESSAGE(UM_ON_PAGER, onPager)
