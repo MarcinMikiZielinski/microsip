@@ -11,6 +11,7 @@ env:
   BUILD_CONFIGURATION: Release
   BUILD_PLATFORM: Win32
   PLATFORM_TOOLSET: v143
+  WINDOWS_SDK: "10.0.22621.0"
 
 jobs:
   build:
@@ -30,6 +31,9 @@ jobs:
           choco install 7zip -y
           choco install innosetup -y
 
+      # -----------------------------
+      # PJSIP DOWNLOAD + FIX STRUCTURE
+      # -----------------------------
       - name: Download PJSIP
         shell: pwsh
         run: |
@@ -51,11 +55,14 @@ jobs:
           } | Select-Object -First 1
 
           if (-not $folder) {
-            throw "Cannot find extracted pjproject folder"
+            throw "PJSIP folder not found after extraction"
           }
 
           Rename-Item $folder.FullName "pjproject"
 
+      # -----------------------------
+      # FIND SOLUTION FILE DYNAMICALLY
+      # -----------------------------
       - name: Find PJSIP solution
         shell: pwsh
         run: |
@@ -64,7 +71,7 @@ jobs:
                  Select-Object -First 1
 
           if (-not $sln) {
-            Write-Host "DEBUG: pjproject structure:"
+            Write-Host "DEBUG pjproject tree:"
             Get-ChildItem -Recurse pjproject | Select-Object FullName
             throw "PJSIP solution not found"
           }
@@ -72,7 +79,10 @@ jobs:
           Write-Host "Solution found: $($sln.FullName)"
           $sln.FullName | Out-File sln.txt
 
-      - name: Configure PJSIP (NO FFMPEG - CI SAFE)
+      # -----------------------------
+      # CONFIG PJSIP (FFMPEG OFF = STABLE CI)
+      # -----------------------------
+      - name: Configure PJSIP
         shell: pwsh
         run: |
           Set-Location pjproject
@@ -110,12 +120,13 @@ jobs:
           Set-Content -Path "pjlib/include/pj/config_site.h" `
             -Value ($configLines -join "`r`n")
 
+      # -----------------------------
+      # BUILD PJSIP
+      # -----------------------------
       - name: Build PJSIP
         shell: pwsh
         run: |
           $sln = Get-Content sln.txt
-
-          Write-Host "Building: $sln"
 
           msbuild $sln `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
@@ -123,6 +134,9 @@ jobs:
             /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
             /m
 
+      # -----------------------------
+      # BUILD MICROSIP (SDK FIX HERE)
+      # -----------------------------
       - name: Build MicroSIP
         shell: pwsh
         run: |
@@ -130,8 +144,12 @@ jobs:
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
             /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
+            /p:WindowsTargetPlatformVersion=${{ env.WINDOWS_SDK }} `
             /m
 
+      # -----------------------------
+      # PACKAGE OUTPUT
+      # -----------------------------
       - name: Prepare Output
         shell: pwsh
         run: |
@@ -150,6 +168,9 @@ jobs:
           name: microsip-build
           path: output/
 
+  # -----------------------------
+  # INSTALLER STAGE
+  # -----------------------------
   create-installer:
     needs: build
     runs-on: windows-latest
