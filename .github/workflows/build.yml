@@ -17,17 +17,17 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache PJSIP
         id: cache-pjsip
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: pjproject
           key: pjsip-2.15.1-win32-v143
 
-      - name: Add MSBuild
-        uses: microsoft/setup-msbuild@v2
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
         with:
           msbuild-architecture: x86
 
@@ -110,7 +110,7 @@ jobs:
           }
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: microsip-build
           path: output/
@@ -120,10 +120,10 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: microsip-build
           path: output/
@@ -145,7 +145,7 @@ jobs:
           }
 
       - name: Upload Installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: microsip-installer
           path: "*.exe"
