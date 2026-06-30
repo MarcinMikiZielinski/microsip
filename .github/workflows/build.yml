@@ -56,8 +56,7 @@ jobs:
       shell: pwsh
       run: |
         Set-Location pjproject
-
-      $configLines = @(
+        $configLines = @(
   "#ifndef __PJ_CONFIG_SITE_H__",
   "#define __PJ_CONFIG_SITE_H__",
   "",
@@ -79,8 +78,8 @@ jobs:
   "",
   "#endif"
 )
-
 Set-Content -Path "pjlib/include/pj/config_site.h" -Value ($configLines -join "`r`n")
+
         Set-Content pjlib/include/pj/config_site.h $cfg
 
     - name: Build PJSIP
