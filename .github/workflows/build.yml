@@ -17,23 +17,27 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout MicroSIP
+        uses: actions/checkout@v5
 
+      # =========================
+      # TOOLCHAIN
+      # =========================
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v3
         with:
           msbuild-architecture: x86
 
-      - name: Install Dependencies
+      - name: Install tools
         shell: pwsh
         run: |
+          choco install git -y
           choco install 7zip -y
-          choco install innosetup -y
 
       # =========================
-      # FIX #1: PROPER PJSIP CLONE (NO ZIP!)
+      # CLONE PJSIP (FULL SAFE WAY)
       # =========================
-      - name: Clone PJSIP (FULL + SUBMODULES)
+      - name: Clone PJSIP (with submodules)
         shell: pwsh
         run: |
           if (Test-Path pjproject) {
@@ -43,24 +47,24 @@ jobs:
           git clone --recursive https://github.com/pjsip/pjproject.git
 
       # =========================
-      # FIX #2: RETARGET SDK
+      # FIX SDK (MicroSIP legacy workaround)
       # =========================
-      - name: Fix Windows SDK 8.1
+      - name: Fix Windows SDK references
         shell: pwsh
         run: |
-          Get-ChildItem -Recurse pjproject -Filter "*.vcxproj" | ForEach-Object {
-            (Get-Content $_.FullName) -replace "8.1", "10.0" |
+          Get-ChildItem pjproject -Recurse -Filter "*.vcxproj" | ForEach-Object {
+            (Get-Content $_.FullName) `
+              -replace "8.1", "10.0" `
+              -replace "10.0.22621.0", "10.0.19041.0" |
             Set-Content $_.FullName
           }
 
       # =========================
-      # CONFIG PJSIP (CI SAFE)
+      # PJSIP CONFIG
       # =========================
       - name: Configure PJSIP
         shell: pwsh
         run: |
-          Set-Location pjproject
-
           $cfg = @(
             "#ifndef __PJ_CONFIG_SITE_H__",
             "#define __PJ_CONFIG_SITE_H__",
@@ -68,7 +72,6 @@ jobs:
             "#define PJ_CONFIG_MICROSIP 1",
             "",
             "#define PJMEDIA_HAS_VIDEO 1",
-            "",
             "#define PJMEDIA_HAS_FFMPEG 0",
             "#define PJMEDIA_HAS_VPX 0",
             "",
@@ -85,10 +88,10 @@ jobs:
             "#endif"
           )
 
-          Set-Content pjlib/include/pj/config_site.h ($cfg -join "`r`n")
+          Set-Content pjproject/pjlib/include/pj/config_site.h ($cfg -join "`r`n")
 
       # =========================
-      # BUILD PJSIP
+      # BUILD PJSIP (SAFE MSBUILD MODE)
       # =========================
       - name: Build PJSIP
         shell: pwsh
@@ -96,14 +99,19 @@ jobs:
           $sln = Get-ChildItem pjproject -Recurse -Filter "*pjproject*.sln" |
                  Select-Object -First 1
 
+          if (-not $sln) {
+            throw "PJSIP solution not found"
+          }
+
           msbuild $sln.FullName `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
             /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
-            /m
+            /m `
+            /p:WindowsTargetPlatformVersion=10.0.19041.0
 
       # =========================
-      # BUILD MICROSIP
+      # BUILD MICRO SIP
       # =========================
       - name: Build MicroSIP
         shell: pwsh
@@ -112,18 +120,24 @@ jobs:
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
             /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
+            /p:WindowsTargetPlatformVersion=10.0.19041.0 `
             /m
 
       # =========================
       # OUTPUT
       # =========================
-      - name: Prepare Output
+      - name: Prepare output
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force output | Out-Null
-          Copy-Item Release/microsip.exe output/ -ErrorAction SilentlyContinue
 
-      - name: Upload
+          if (Test-Path "Release/microsip.exe") {
+            Copy-Item "Release/microsip.exe" output/
+          } elseif (Test-Path "x86/Release/microsip.exe") {
+            Copy-Item "x86/Release/microsip.exe" output/
+          }
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
           name: microsip
