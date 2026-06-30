@@ -10,6 +10,7 @@ on:
 env:
   BUILD_CONFIGURATION: Release
   BUILD_PLATFORM: Win32
+  PLATFORM_TOOLSET: v143
 
 jobs:
   build:
@@ -63,15 +64,15 @@ jobs:
                  Select-Object -First 1
 
           if (-not $sln) {
-            Write-Host "DEBUG: pjproject tree:"
+            Write-Host "DEBUG: pjproject structure:"
             Get-ChildItem -Recurse pjproject | Select-Object FullName
             throw "PJSIP solution not found"
           }
 
-          Write-Host "Found solution: $($sln.FullName)"
+          Write-Host "Solution found: $($sln.FullName)"
           $sln.FullName | Out-File sln.txt
 
-      - name: Configure PJSIP
+      - name: Configure PJSIP (NO FFMPEG - CI SAFE)
         shell: pwsh
         run: |
           Set-Location pjproject
@@ -83,16 +84,23 @@ jobs:
             "#define PJ_CONFIG_MICROSIP 1",
             "",
             "#define PJMEDIA_HAS_VIDEO 1",
-            "#define PJMEDIA_HAS_FFMPEG 1",
-            "#define PJMEDIA_HAS_VPX 1",
+            "",
+            "#define PJMEDIA_HAS_FFMPEG 0",
+            "#define PJMEDIA_HAS_VPX 0",
             "",
             "#define PJMEDIA_HAS_OPUS 1",
             "#define PJMEDIA_HAS_SILK 1",
             "#define PJMEDIA_HAS_G722 1",
             "#define PJMEDIA_HAS_GSM 1",
+            "#define PJMEDIA_HAS_G729 1",
+            "#define PJMEDIA_HAS_G726 1",
+            "#define PJMEDIA_HAS_ILBC 1",
             "",
             "#define PJMEDIA_HAS_SRTP 1",
             "#define PJMEDIA_HAS_TLS 1",
+            "",
+            "#define PJMEDIA_HAS_WEBRTC_AEC 1",
+            "#define PJMEDIA_HAS_WEBRTC_VAD 1",
             "",
             "#include <pj/config_site_sample.h>",
             "",
@@ -107,12 +115,12 @@ jobs:
         run: |
           $sln = Get-Content sln.txt
 
-          Write-Host "Building PJSIP solution: $sln"
+          Write-Host "Building: $sln"
 
           msbuild $sln `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
-            /p:PlatformToolset=v143 `
+            /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
             /m
 
       - name: Build MicroSIP
@@ -121,7 +129,7 @@ jobs:
           msbuild microsip.vcxproj `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
-            /p:PlatformToolset=v143 `
+            /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
             /m
 
       - name: Prepare Output
