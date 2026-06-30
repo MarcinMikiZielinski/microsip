@@ -30,26 +30,39 @@ jobs:
           choco install 7zip -y
           choco install innosetup -y
 
-      - name: Download PJSIP (clean, no cache)
+      - name: Download PJSIP (robust extract)
         shell: pwsh
         run: |
           Write-Host "Downloading PJSIP..."
 
           $version = "2.15.1"
+          $zip = "pj.zip"
           $url = "https://github.com/pjsip/pjproject/archive/refs/tags/$version.zip"
 
-          Invoke-WebRequest $url -OutFile pj.zip
+          Invoke-WebRequest $url -OutFile $zip
 
           if (Test-Path "pjproject") {
             Remove-Item -Recurse -Force pjproject
           }
 
-          Expand-Archive pj.zip -DestinationPath .
+          Expand-Archive $zip -DestinationPath .
 
-          Rename-Item "pjproject-$version" "pjproject"
+          # 🔥 find real extracted folder dynamically
+          $folder = Get-ChildItem -Directory | Where-Object {
+            $_.Name -like "pjproject-*"
+          } | Select-Object -First 1
+
+          if (-not $folder) {
+            throw "PJSIP folder not found after extraction"
+          }
+
+          Rename-Item $folder.FullName "pjproject"
 
           if (!(Test-Path "pjproject/pjproject.sln")) {
-            throw "PJSIP extraction failed - pjproject.sln missing"
+            Write-Host "DEBUG: extracted structure:"
+            Get-ChildItem -Recurse pjproject | ForEach-Object { $_.FullName }
+
+            throw "pjproject.sln missing - invalid extraction"
           }
 
       - name: Configure PJSIP
@@ -80,7 +93,8 @@ jobs:
             "#endif"
           )
 
-          Set-Content -Path "pjlib/include/pj/config_site.h" -Value ($configLines -join "`r`n")
+          Set-Content -Path "pjlib/include/pj/config_site.h" `
+            -Value ($configLines -join "`r`n")
 
       - name: Build PJSIP
         shell: pwsh
@@ -110,7 +124,7 @@ jobs:
           if (Test-Path "Release/microsip.exe") {
             Copy-Item "Release/microsip.exe" output/
           } else {
-            Write-Host "microsip.exe not found in Release/"
+            Write-Host "No microsip.exe found"
             Get-ChildItem -Recurse Release -ErrorAction SilentlyContinue
           }
 
