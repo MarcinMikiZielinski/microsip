@@ -52,34 +52,35 @@ jobs:
 
         Rename-Item "pjproject-$version" "pjproject"
 
-    - name: Configure PJSIP
-      shell: pwsh
-      run: |
-        Set-Location pjproject
-        $configLines = @(
-  "#ifndef __PJ_CONFIG_SITE_H__",
-  "#define __PJ_CONFIG_SITE_H__",
-  "",
-  "#define PJ_CONFIG_MICROSIP 1",
-  "",
-  "#define PJMEDIA_HAS_VIDEO 1",
-  "#define PJMEDIA_HAS_FFMPEG 1",
-  "#define PJMEDIA_HAS_VPX 1",
-  "",
-  "#define PJMEDIA_HAS_OPUS 1",
-  "#define PJMEDIA_HAS_SILK 1",
-  "#define PJMEDIA_HAS_G722 1",
-  "#define PJMEDIA_HAS_GSM 1",
-  "",
-  "#define PJMEDIA_HAS_SRTP 1",
-  "#define PJMEDIA_HAS_TLS 1",
-  "",
-  "#include <pj/config_site_sample.h>",
-  "",
-  "#endif"
-)
-Set-Content -Path "pjlib/include/pj/config_site.h" -Value ($configLines -join "`r`n")
+  - name: Configure PJSIP
+  shell: pwsh
+  run: |
+    Set-Location pjproject
 
+    $configLines = @(
+      "#ifndef __PJ_CONFIG_SITE_H__",
+      "#define __PJ_CONFIG_SITE_H__",
+      "",
+      "#define PJ_CONFIG_MICROSIP 1",
+      "",
+      "#define PJMEDIA_HAS_VIDEO 1",
+      "#define PJMEDIA_HAS_FFMPEG 1",
+      "#define PJMEDIA_HAS_VPX 1",
+      "",
+      "#define PJMEDIA_HAS_OPUS 1",
+      "#define PJMEDIA_HAS_SILK 1",
+      "#define PJMEDIA_HAS_G722 1",
+      "#define PJMEDIA_HAS_GSM 1",
+      "",
+      "#define PJMEDIA_HAS_SRTP 1",
+      "#define PJMEDIA_HAS_TLS 1",
+      "",
+      "#include <pj/config_site_sample.h>",
+      "",
+      "#endif"
+    )
+
+    Set-Content -Path "pjlib/include/pj/config_site.h" -Value ($configLines -join "`r`n")
         Set-Content pjlib/include/pj/config_site.h $cfg
 
     - name: Build PJSIP
