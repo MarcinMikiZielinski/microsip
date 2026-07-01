@@ -10,50 +10,25 @@ on:
 env:
   BUILD_CONFIGURATION: Release
   BUILD_PLATFORM: Win32
-  PLATFORM_TOOLSET: v143
+  PLATFORM_TOOLSET: v142
   SDK_VERSION: 10.0
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2019   # VS 2019 — MFC included in image by default
 
     steps:
       - name: Checkout MicroSIP
         uses: actions/checkout@v4
 
-      - name: Install MFC (x86) via VS Installer
+      - name: Verify MFC is available
         shell: pwsh
         run: |
-          $vswhere   = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          $vsPath    = & $vswhere -latest -products * -property installationPath
-          Write-Host "VS path: $vsPath"
-
-          $proc = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
-            "modify",
-            "--installPath", $vsPath,
-            "--add", "Microsoft.VisualStudio.Component.MFC",
-            "--quiet",
-            "--norestart",
-            "--force"
-          )
-          Write-Host "Installer exit code: $($proc.ExitCode)"
-          # 0 = success, 3010 = reboot needed (libs are installed), anything else is a real error
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
-            throw "VS Installer failed with exit code $($proc.ExitCode)"
-          }
-
-          # Verify MFC libs are now present (Win32/x86)
-          $mfcLib = Get-ChildItem "$vsPath\VC\Tools\MSVC" -Recurse -Filter "mfc140.lib" -ErrorAction SilentlyContinue |
-                    Select-Object -First 1
-          if ($mfcLib) {
-            Write-Host "MFC lib found: $($mfcLib.FullName)"
-          } else {
-            Write-Host "WARNING: mfc140.lib not found after install"
-            # List what MFC-related files exist
-            Get-ChildItem "$vsPath\VC\Tools\MSVC" -Recurse -Filter "mfc*" -ErrorAction SilentlyContinue |
-              Select-Object FullName | ForEach-Object { Write-Host $_.FullName }
-          }
+          $mfc = Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio\2019" `
+                   -Recurse -Filter "mfc140.lib" -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if ($mfc) { Write-Host "MFC OK: $($mfc.FullName)" }
+          else       { throw "mfc140.lib not found — image may have changed" }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -68,10 +43,10 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem pjproject -Recurse -Filter "*.vcxproj" | ForEach-Object {
-            $content = Get-Content $_.FullName -Raw
-            $content = $content -replace '<WindowsTargetPlatformVersion>[^<]+</WindowsTargetPlatformVersion>',
-                                          '<WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>'
-            Set-Content $_.FullName $content
+            $c = Get-Content $_.FullName -Raw
+            $c = $c -replace '<WindowsTargetPlatformVersion>[^<]+</WindowsTargetPlatformVersion>',
+                              '<WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>'
+            Set-Content $_.FullName $c
           }
 
       - name: Configure PJSIP
@@ -80,21 +55,15 @@ jobs:
           $cfg = @(
             "#ifndef __PJ_CONFIG_SITE_H__",
             "#define __PJ_CONFIG_SITE_H__",
-            "",
             "#define PJ_CONFIG_MICROSIP 1",
-            "",
             "#define PJMEDIA_HAS_VIDEO 0",
             "#define PJMEDIA_HAS_FFMPEG 0",
             "#define PJMEDIA_HAS_VPX 0",
-            "",
             "#define PJMEDIA_HAS_OPUS 1",
             "#define PJMEDIA_HAS_G722 1",
             "#define PJMEDIA_HAS_GSM 1",
-            "",
             "#define PJMEDIA_HAS_SRTP 1",
-            "",
             "#include <pj/config_site_sample.h>",
-            "",
             "#endif"
           )
           Set-Content pjproject/pjlib/include/pj/config_site.h ($cfg -join "`r`n")
