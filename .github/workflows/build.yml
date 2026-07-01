@@ -10,25 +10,51 @@ on:
 env:
   BUILD_CONFIGURATION: Release
   BUILD_PLATFORM: Win32
-  PLATFORM_TOOLSET: v142
+  PLATFORM_TOOLSET: v143
   SDK_VERSION: 10.0
 
 jobs:
   build:
-    runs-on: windows-2019   # VS 2019 — MFC included in image by default
+    runs-on: windows-2022
 
     steps:
       - name: Checkout MicroSIP
         uses: actions/checkout@v4
 
-      - name: Verify MFC is available
+      - name: Install MFC via VS Build Tools bootstrapper
         shell: pwsh
         run: |
-          $mfc = Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio\2019" `
-                   -Recurse -Filter "mfc140.lib" -ErrorAction SilentlyContinue |
+          Write-Host "Downloading VS 2022 Build Tools bootstrapper..."
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_buildtools.exe" `
+            -OutFile "$env:TEMP\vs_buildtools.exe" -UseBasicParsing
+
+          Write-Host "Installing MFC component..."
+          $proc = Start-Process -FilePath "$env:TEMP\vs_buildtools.exe" -Wait -PassThru `
+            -ArgumentList @(
+              "--quiet", "--norestart", "--nocache",
+              "--installPath", "C:\VS_MFC",
+              "--add", "Microsoft.VisualStudio.Component.MFC",
+              "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+            )
+          Write-Host "Bootstrapper exit code: $($proc.ExitCode)"
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+            throw "VS Build Tools installation failed: exit code $($proc.ExitCode)"
+          }
+
+          # Verify MFC is present
+          $mfc = Get-ChildItem "C:\VS_MFC" -Recurse -Filter "mfc140.lib" -ErrorAction SilentlyContinue |
                  Select-Object -First 1
           if ($mfc) { Write-Host "MFC OK: $($mfc.FullName)" }
-          else       { throw "mfc140.lib not found — image may have changed" }
+          else       { throw "mfc140.lib not found after installation" }
+
+          # Add MFC include/lib paths to system environment so MSBuild finds them
+          $vcVer   = (Get-ChildItem "C:\VS_MFC\VC\Tools\MSVC" | Sort-Object Name -Descending | Select-Object -First 1).Name
+          $mfcInc  = "C:\VS_MFC\VC\Tools\MSVC\$vcVer\atlmfc\include"
+          $mfcLib  = "C:\VS_MFC\VC\Tools\MSVC\$vcVer\atlmfc\lib\x86"
+          Write-Host "MFC include: $mfcInc"
+          Write-Host "MFC lib:     $mfcLib"
+          echo "MFC_INCLUDE=$mfcInc" >> $env:GITHUB_ENV
+          echo "MFC_LIB=$mfcLib"     >> $env:GITHUB_ENV
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -105,6 +131,8 @@ jobs:
             /p:Platform=${{ env.BUILD_PLATFORM }} `
             /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
             /p:WindowsTargetPlatformVersion=${{ env.SDK_VERSION }} `
+            /p:AdditionalIncludeDirectories="${{ env.MFC_INCLUDE }}" `
+            /p:AdditionalLibraryDirectories="${{ env.MFC_LIB }}" `
             /m /v:m
 
       - name: Collect output
