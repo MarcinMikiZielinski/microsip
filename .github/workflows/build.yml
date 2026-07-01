@@ -26,10 +26,23 @@ jobs:
         with:
           msbuild-architecture: x86
 
-      - name: Install tools
+      - name: Install MFC libraries
         shell: pwsh
         run: |
-          choco install 7zip -y
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          Write-Host "VS path: $vsPath"
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" modify `
+            --installPath "$vsPath" `
+            --add Microsoft.VisualStudio.Component.MFC `
+            --add Microsoft.VisualStudio.Component.VC.MFC.ARM `
+            --quiet --norestart --force
+          Write-Host "MFC install exit code: $LASTEXITCODE"
+
+      - name: Install tools
+        shell: pwsh
+        run: choco install 7zip -y
 
       - name: Clone PJSIP
         shell: pwsh
@@ -88,7 +101,6 @@ jobs:
       - name: Setup pjproject include/lib paths for MicroSIP
         shell: pwsh
         run: |
-          # MicroSIP vcxproj expects pjproject libs one level up from the repo
           $base = Split-Path "${{ github.workspace }}" -Parent
           $src  = "${{ github.workspace }}\pjproject"
 
@@ -100,7 +112,6 @@ jobs:
               Copy-Item "$src\$dir\include\*" "$dst\include\" -Recurse -Force
             }
           }
-          # copy all built .lib files
           Get-ChildItem "$src" -Recurse -Filter "*.lib" |
             Where-Object { $_.FullName -match "Win32\\Release" } |
             ForEach-Object { Copy-Item $_.FullName "$base\pjlib\lib\" -Force }
