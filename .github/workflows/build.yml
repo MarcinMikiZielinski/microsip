@@ -21,27 +21,48 @@ jobs:
       - name: Checkout MicroSIP
         uses: actions/checkout@v4
 
-      - name: Install MFC via Chocolatey
+      - name: Install MFC (x86) via VS Installer
         shell: pwsh
         run: |
-          choco install visualstudio2022-workload-nativedesktop `
-            --package-parameters "--add Microsoft.VisualStudio.Component.MFC" `
-            --no-progress -y
-          refreshenv
+          $vswhere   = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          $vsPath    = & $vswhere -latest -products * -property installationPath
+          Write-Host "VS path: $vsPath"
+
+          $proc = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
+            "modify",
+            "--installPath", $vsPath,
+            "--add", "Microsoft.VisualStudio.Component.MFC",
+            "--quiet",
+            "--norestart",
+            "--force"
+          )
+          Write-Host "Installer exit code: $($proc.ExitCode)"
+          # 0 = success, 3010 = reboot needed (libs are installed), anything else is a real error
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+            throw "VS Installer failed with exit code $($proc.ExitCode)"
+          }
+
+          # Verify MFC libs are now present (Win32/x86)
+          $mfcLib = Get-ChildItem "$vsPath\VC\Tools\MSVC" -Recurse -Filter "mfc140.lib" -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+          if ($mfcLib) {
+            Write-Host "MFC lib found: $($mfcLib.FullName)"
+          } else {
+            Write-Host "WARNING: mfc140.lib not found after install"
+            # List what MFC-related files exist
+            Get-ChildItem "$vsPath\VC\Tools\MSVC" -Recurse -Filter "mfc*" -ErrorAction SilentlyContinue |
+              Select-Object FullName | ForEach-Object { Write-Host $_.FullName }
+          }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
           msbuild-architecture: x86
 
-      - name: Install tools
-        shell: pwsh
-        run: choco install 7zip -y --no-progress
-
       - name: Clone PJSIP
         shell: pwsh
-        run: |
-          git clone --depth 1 --recursive https://github.com/pjsip/pjproject.git
+        run: git clone --depth 1 --recursive https://github.com/pjsip/pjproject.git
 
       - name: Fix SDK version in PJSIP projects
         shell: pwsh
@@ -81,10 +102,8 @@ jobs:
       - name: Build PJSIP
         shell: pwsh
         run: |
-          $sln = Get-ChildItem pjproject -Recurse -Filter "*pjproject*.sln" |
-                 Select-Object -First 1
+          $sln = Get-ChildItem pjproject -Recurse -Filter "*pjproject*.sln" | Select-Object -First 1
           if (-not $sln) { throw "PJSIP solution not found" }
-
           msbuild $sln.FullName `
             /p:Configuration=${{ env.BUILD_CONFIGURATION }} `
             /p:Platform=${{ env.BUILD_PLATFORM }} `
@@ -92,12 +111,11 @@ jobs:
             /p:WindowsTargetPlatformVersion=${{ env.SDK_VERSION }} `
             /m /v:m
 
-      - name: Setup pjproject include/lib paths for MicroSIP
+      - name: Setup pjproject paths for MicroSIP
         shell: pwsh
         run: |
           $base = Split-Path "${{ github.workspace }}" -Parent
           $src  = "${{ github.workspace }}\pjproject"
-
           foreach ($dir in @("pjlib","pjlib-util","pjsip","pjmedia","pjnath")) {
             $dst = "$base\$dir"
             New-Item -ItemType Directory -Force "$dst\include" | Out-Null
@@ -124,12 +142,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force output | Out-Null
-          $candidates = @(
-            "Release\microsip.exe",
-            "Win32\Release\microsip.exe",
-            "x86\Release\microsip.exe"
-          )
-          foreach ($p in $candidates) {
+          foreach ($p in @("Release\microsip.exe","Win32\Release\microsip.exe","x86\Release\microsip.exe")) {
             if (Test-Path $p) { Copy-Item $p output\; break }
           }
 
